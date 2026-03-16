@@ -9,6 +9,7 @@ import jakarta.mail.internet.MimeBodyPart;
 import jakarta.mail.internet.MimeMessage;
 import jakarta.mail.internet.MimeMultipart;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -156,7 +157,13 @@ public class AliyunEmailSender {
                 .getClassLoader()
                 .getResourceAsStream(HTML_TEMPLATE)) {
             if (is != null) {
-                return new String(is.readAllBytes(), StandardCharsets.UTF_8);
+                ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+                byte[] chunk = new byte[4096];
+                int bytesRead;
+                while ((bytesRead = is.read(chunk)) != -1) {
+                    buffer.write(chunk, 0, bytesRead);
+                }
+                return buffer.toString(StandardCharsets.UTF_8.name());
             }
         } catch (IOException e) {
             System.err.println("[WARN] Could not load HTML template: " + e.getMessage());

@@ -11,35 +11,73 @@ import jakarta.mail.util.ByteArrayDataSource;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
 import java.util.Properties;
 
 /**
  * Elantor Email Sender
- * Supports HTML marketing emails with PDF catalog attachment.
+ * Sends plain-text marketing emails with a PDF product catalog attachment.
  * Uses Alibaba Cloud Enterprise Mail (smtp.qiye.aliyun.com) via SSL.
- *
- * Both the HTML template and PDF catalog are loaded from the classpath
- * (src/main/resources/), so they work correctly both in IDE and after
- * Maven packaging.
  */
 public class AliyunEmailSender {
 
     // ── SMTP Configuration ──────────────────────────────────────────────────
-    private static final String SMTP_HOST      = "smtp.qiye.aliyun.com";
-    private static final int    SMTP_PORT      = 465;
-    private static final String SENDER_EMAIL   = "elantor@ielantor.com";
+    private static final String SMTP_HOST       = "smtp.qiye.aliyun.com";
+    private static final int    SMTP_PORT       = 465;
+    private static final String SENDER_EMAIL    = "elantor@ielantor.com";
     private static final String SENDER_PASSWORD = "Y8GZAUbmzqA47Ukd";
 
-    // ── Classpath Resources (under src/main/resources/) ─────────────────────
-    /** HTML template resource name on classpath */
-    private static final String HTML_TEMPLATE  = "email_template.html";
-    /** PDF catalog resource name on classpath */
-    private static final String CATALOG_PDF    = "Elantor_Product_Catalog.pdf";
+    // ── Classpath Resource ───────────────────────────────────────────────────
+    /** PDF catalog resource name (placed under src/main/resources/) */
+    private static final String CATALOG_PDF = "Elantor_Product_Catalog.pdf";
 
     // ── Email Subject ────────────────────────────────────────────────────────
-    private static final String EMAIL_SUBJECT  =
-            "Elantor | Professional ULV Cold Fogger Factory \u2013 Special Offer & Product Catalog";
+    private static final String EMAIL_SUBJECT =
+            "Elantor | Professional ULV Cold Fogger Factory – Special Offer & Product Catalog";
+
+    // ── Plain-text Email Body ────────────────────────────────────────────────
+    private static final String EMAIL_BODY =
+            "Dear Sir/Madam,\n\n"
+            + "My name is Franklin Zhou, Sales Manager at Elantor Co., Ltd.\n\n"
+            + "We are a professional manufacturer specializing in ULV Cold Foggers, "
+            + "founded in 2017. With over 7 years of production experience, our products "
+            + "have been exported to more than 50 countries worldwide and are trusted by "
+            + "pest control professionals, agricultural operators, and public health agencies.\n\n"
+            + "---\n\n"
+            + "FEATURED PRODUCT: Electric ULV Cold Fogger – Model YF-500\n\n"
+            + "This is our best-selling model, designed for efficient disinfection, "
+            + "pest control, and chemical application across a wide range of environments.\n\n"
+            + "Key Specifications:\n"
+            + "  - Power:         1000W\n"
+            + "  - Spray Range:   Up to 8 meters\n"
+            + "  - Tank Capacity: 5 Liters\n"
+            + "  - Particle Size: 10 – 150 μm (Adjustable)\n"
+            + "  - Flow Rate:     470 ml/min\n"
+            + "  - Net Weight:    2.35 kg\n"
+            + "  - Voltage:       220V / 110V (Optional)\n"
+            + "  - Certification: CE Certified\n\n"
+            + "We are currently offering very competitive factory prices with support "
+            + "for small-batch and custom orders. Whether you need a sample order or "
+            + "bulk supply, we are happy to accommodate your requirements.\n\n"
+            + "---\n\n"
+            + "Please find our full product catalog attached to this email. "
+            + "It covers our complete product range, including:\n"
+            + "  - Electric ULV Cold Fogger (YF-500)\n"
+            + "  - Thermal Fogger (TSF-35D)\n"
+            + "  - Mini Mist Fogger (MF-100)\n"
+            + "  - Portable Backpack Thermal Fogger\n"
+            + "  - 5.6L Ultra-Low Volume Sprayer\n"
+            + "  - Stainless Steel Backpack Pressure Sprayer (ZL-210A)\n\n"
+            + "If you are interested in any of our products or would like to discuss "
+            + "pricing, customization, or cooperation, please do not hesitate to contact us.\n\n"
+            + "We look forward to hearing from you!\n\n"
+            + "Best regards,\n"
+            + "Franklin Zhou\n"
+            + "Sales Manager | Elantor Co., Ltd.\n"
+            + "Email:    info@elantor.com\n"
+            + "WhatsApp: +86 19540736965\n"
+            + "Website:  www.ielantor.com\n"
+            + "Address:  Xing Business Building 310, Bulong Road, Bantian Street,\n"
+            + "          Longgang District, Shenzhen, China 518118\n";
 
     // ────────────────────────────────────────────────────────────────────────
     //  Public API
@@ -70,19 +108,19 @@ public class AliyunEmailSender {
     }
 
     /**
-     * Send the pre-built Elantor marketing email (HTML body + PDF catalog attachment).
-     * Both resources are loaded from the classpath.
+     * Send the Elantor marketing email: plain-text body + PDF catalog attachment.
+     * The PDF is loaded from the classpath (src/main/resources/).
      *
      * @param to Recipient email address
      */
     public static void sendMarketingEmail(String to) {
-        String htmlContent = loadResource(HTML_TEMPLATE);
-        byte[] pdfBytes    = loadResourceBytes(CATALOG_PDF);
+        byte[] pdfBytes = loadResourceBytes(CATALOG_PDF);
 
         if (pdfBytes == null) {
+            // No PDF found – send plain text only
             System.err.println("[WARN] PDF catalog not found on classpath: " + CATALOG_PDF
                     + ". Sending email without attachment.");
-            sendEmail(to, EMAIL_SUBJECT, htmlContent, true);
+            sendEmail(to, EMAIL_SUBJECT, EMAIL_BODY, false);
             return;
         }
 
@@ -93,11 +131,11 @@ public class AliyunEmailSender {
             message.addRecipient(Message.RecipientType.TO, new InternetAddress(to));
             message.setSubject(EMAIL_SUBJECT, "UTF-8");
 
-            // ── HTML body part ──
-            MimeBodyPart htmlPart = new MimeBodyPart();
-            htmlPart.setContent(htmlContent, "text/html;charset=UTF-8");
+            // ── Plain-text body part ──
+            MimeBodyPart textPart = new MimeBodyPart();
+            textPart.setContent(EMAIL_BODY, "text/plain;charset=UTF-8");
 
-            // ── PDF attachment part (loaded from classpath bytes) ──
+            // ── PDF attachment part (loaded from classpath) ──
             MimeBodyPart attachPart = new MimeBodyPart();
             ByteArrayDataSource pdfSource = new ByteArrayDataSource(pdfBytes, "application/pdf");
             attachPart.setDataHandler(new DataHandler(pdfSource));
@@ -105,7 +143,7 @@ public class AliyunEmailSender {
 
             // ── Combine into multipart/mixed ──
             MimeMultipart multipart = new MimeMultipart("mixed");
-            multipart.addBodyPart(htmlPart);
+            multipart.addBodyPart(textPart);
             multipart.addBodyPart(attachPart);
 
             message.setContent(multipart);
@@ -123,7 +161,7 @@ public class AliyunEmailSender {
 
     /**
      * Build and return an authenticated SMTP Session with timeout settings
-     * to prevent connection reset on large attachments.
+     * to prevent connection reset on larger attachments.
      */
     private static Session createSession() {
         Properties props = new Properties();
@@ -131,7 +169,6 @@ public class AliyunEmailSender {
         props.put("mail.smtp.port",              String.valueOf(SMTP_PORT));
         props.put("mail.smtp.ssl.enable",        "true");
         props.put("mail.smtp.auth",              "true");
-        // Increase timeouts to handle larger attachments (milliseconds)
         props.put("mail.smtp.connectiontimeout", "30000");  // 30s connect timeout
         props.put("mail.smtp.timeout",           "60000");  // 60s read timeout
         props.put("mail.smtp.writetimeout",      "60000");  // 60s write timeout
@@ -143,27 +180,6 @@ public class AliyunEmailSender {
             }
         };
         return Session.getInstance(props, auth);
-    }
-
-    /**
-     * Load a classpath resource as a UTF-8 String.
-     * Falls back to a minimal inline HTML template if the resource is not found.
-     */
-    private static String loadResource(String resourceName) {
-        byte[] bytes = loadResourceBytes(resourceName);
-        if (bytes != null) {
-            return new String(bytes, StandardCharsets.UTF_8);
-        }
-        System.err.println("[WARN] Resource not found on classpath: " + resourceName + ". Using fallback template.");
-        return "<html><body>"
-                + "<h2>Elantor \u2013 Professional ULV Cold Fogger Factory</h2>"
-                + "<p>Dear Customer,</p>"
-                + "<p>We are <strong>Elantor Co., Ltd.</strong>, a professional manufacturer of ULV Cold Foggers "
-                + "founded in 2017 with 7+ years of production experience.</p>"
-                + "<p>Please find our product catalog attached. Contact us at "
-                + "<a href='mailto:info@elantor.com'>info@elantor.com</a> for pricing and orders.</p>"
-                + "<p>Best regards,<br/>Franklin Zhou | Sales Manager<br/>WhatsApp: +86 19540736965</p>"
-                + "</body></html>";
     }
 
     /**
@@ -195,8 +211,8 @@ public class AliyunEmailSender {
     // ────────────────────────────────────────────────────────────────────────
 
     public static void main(String[] args) {
-        // ── Send marketing email with PDF catalog to a single customer ──
-        sendMarketingEmail("3429265681@qq.com");
+        // ── Send marketing email to a single customer ──
+        sendMarketingEmail("customer@example.com");
 
         // ── Send to multiple customers ──
         // String[] customers = {"buyer1@example.com", "buyer2@example.com"};

@@ -1,72 +1,193 @@
 package company.customersearcher;
 
+import jakarta.activation.DataHandler;
+import jakarta.activation.DataSource;
+import jakarta.activation.FileDataSource;
 import jakarta.mail.*;
 import jakarta.mail.internet.InternetAddress;
+import jakarta.mail.internet.MimeBodyPart;
 import jakarta.mail.internet.MimeMessage;
+import jakarta.mail.internet.MimeMultipart;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.Properties;
 
+/**
+ * Elantor Email Sender
+ * Supports HTML marketing emails with PDF catalog attachment.
+ * Uses Alibaba Cloud Enterprise Mail (smtp.qiye.aliyun.com) via SSL.
+ */
 public class AliyunEmailSender {
-    // 阿里云邮箱SMTP配置
-    private static final String SMTP_HOST = "smtp.qiye.aliyun.com";
-    private static final int SMTP_PORT = 465; // SSL加密端口（推荐）
-    // 你的阿里云企业邮箱账号（完整地址）
-    private static final String SENDER_EMAIL = "elantor@ielantor.com";
-    // 邮箱密码（开启二次验证则填客户端专用密码）
+
+    // ── SMTP Configuration ──────────────────────────────────────────────────
+    private static final String SMTP_HOST     = "smtp.qiye.aliyun.com";
+    private static final int    SMTP_PORT     = 465;
+    private static final String SENDER_EMAIL  = "elantor@ielantor.com";
     private static final String SENDER_PASSWORD = "Y8GZAUbmzqA47Ukd";
 
+    // ── Email Assets (placed under src/main/resources/) ─────────────────────
+    /** HTML template file name (on classpath) */
+    private static final String HTML_TEMPLATE = "email_template.html";
+    /** PDF catalog file path (absolute or relative to working directory) */
+    private static final String CATALOG_PDF_PATH = "src/main/resources/Elantor_Product_Catalog.pdf";
+
+    // ── Email Subject ────────────────────────────────────────────────────────
+    private static final String EMAIL_SUBJECT =
+            "Elantor | Professional ULV Cold Fogger Factory – Special Offer & Product Catalog";
+
+    // ────────────────────────────────────────────────────────────────────────
+    //  Public API
+    // ────────────────────────────────────────────────────────────────────────
+
     /**
-     * 发送基础邮件
-     * @param to 收件人邮箱（单个）
-     * @param subject 邮件主题
-     * @param content 邮件内容（支持HTML）
-     * @param isHtml 是否为HTML格式
+     * Send a plain-text or HTML email (no attachment).
+     *
+     * @param to      Recipient email address
+     * @param subject Email subject
+     * @param content Email body content
+     * @param isHtml  true = HTML format, false = plain text
      */
     public static void sendEmail(String to, String subject, String content, boolean isHtml) {
-        // 1. 配置SMTP属性
-        Properties props = new Properties();
-        props.put("mail.smtp.host", SMTP_HOST);
-        props.put("mail.smtp.port", SMTP_PORT);
-        props.put("mail.smtp.ssl.enable", "true"); // 开启SSL加密
-        props.put("mail.smtp.auth", "true"); // 开启身份验证
+        Session session = createSession();
+        try {
+            MimeMessage message = new MimeMessage(session);
+            message.setFrom(new InternetAddress(SENDER_EMAIL));
+            message.addRecipient(Message.RecipientType.TO, new InternetAddress(to));
+            message.setSubject(subject, "UTF-8");
+            message.setContent(content, isHtml ? "text/html;charset=UTF-8" : "text/plain;charset=UTF-8");
+            Transport.send(message);
+            System.out.println("[SUCCESS] Email sent to: " + to);
+        } catch (MessagingException e) {
+            System.err.println("[ERROR] Failed to send email to " + to + ": " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
 
-        // 2. 创建认证器
-        Authenticator authenticator = new Authenticator() {
+    /**
+     * Send an HTML email with one file attachment.
+     *
+     * @param to             Recipient email address
+     * @param subject        Email subject
+     * @param htmlContent    HTML body content
+     * @param attachmentPath Absolute or relative path to the attachment file
+     * @param attachmentName Display name of the attachment (e.g. "Catalog.pdf")
+     */
+    public static void sendEmailWithAttachment(String to, String subject,
+                                               String htmlContent,
+                                               String attachmentPath,
+                                               String attachmentName) {
+        Session session = createSession();
+        try {
+            MimeMessage message = new MimeMessage(session);
+            message.setFrom(new InternetAddress(SENDER_EMAIL));
+            message.addRecipient(Message.RecipientType.TO, new InternetAddress(to));
+            message.setSubject(subject, "UTF-8");
+
+            // HTML body part
+            MimeBodyPart htmlPart = new MimeBodyPart();
+            htmlPart.setContent(htmlContent, "text/html;charset=UTF-8");
+
+            // Attachment part
+            MimeBodyPart attachPart = new MimeBodyPart();
+            DataSource source = new FileDataSource(attachmentPath);
+            attachPart.setDataHandler(new DataHandler(source));
+            attachPart.setFileName(attachmentName);
+
+            // Combine into multipart/mixed
+            MimeMultipart multipart = new MimeMultipart("mixed");
+            multipart.addBodyPart(htmlPart);
+            multipart.addBodyPart(attachPart);
+
+            message.setContent(multipart);
+            Transport.send(message);
+            System.out.println("[SUCCESS] Email with attachment sent to: " + to);
+        } catch (MessagingException e) {
+            System.err.println("[ERROR] Failed to send email to " + to + ": " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * Send the pre-built Elantor marketing email (HTML + PDF catalog) to a recipient.
+     * The HTML template and PDF catalog are loaded from the resources directory.
+     *
+     * @param to Recipient email address
+     */
+    public static void sendMarketingEmail(String to) {
+        String htmlContent = loadHtmlTemplate();
+        sendEmailWithAttachment(
+                to,
+                EMAIL_SUBJECT,
+                htmlContent,
+                CATALOG_PDF_PATH,
+                "Elantor_Product_Catalog.pdf"
+        );
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    //  Private helpers
+    // ────────────────────────────────────────────────────────────────────────
+
+    /** Build and return an authenticated SMTP Session. */
+    private static Session createSession() {
+        Properties props = new Properties();
+        props.put("mail.smtp.host",       SMTP_HOST);
+        props.put("mail.smtp.port",       SMTP_PORT);
+        props.put("mail.smtp.ssl.enable", "true");
+        props.put("mail.smtp.auth",       "true");
+
+        Authenticator auth = new Authenticator() {
             @Override
             protected PasswordAuthentication getPasswordAuthentication() {
                 return new PasswordAuthentication(SENDER_EMAIL, SENDER_PASSWORD);
             }
         };
-
-        // 3. 获取Session对象
-        Session session = Session.getInstance(props, authenticator);
-        session.setDebug(true); // 开启调试模式（可查看发送日志）
-
-        try {
-            // 4. 创建邮件消息
-            MimeMessage message = new MimeMessage(session);
-            // 设置发件人
-            message.setFrom(new InternetAddress(SENDER_EMAIL));
-            // 设置收件人
-            message.addRecipient(Message.RecipientType.TO, new InternetAddress(to));
-            // 设置主题
-            message.setSubject(subject, "UTF-8");
-            // 设置内容（文本/HTML）
-            message.setContent(content, isHtml ? "text/html;charset=UTF-8" : "text/plain;charset=UTF-8");
-
-            // 5. 发送邮件
-            Transport.send(message);
-            System.out.println("邮件发送成功！");
-        } catch (MessagingException e) {
-            System.err.println("邮件发送失败：" + e.getMessage());
-            e.printStackTrace();
-        }
+        return Session.getInstance(props, auth);
     }
 
-    // 测试方法
+    /**
+     * Load the HTML email template from the classpath.
+     * Falls back to a minimal inline template if the file is not found.
+     */
+    private static String loadHtmlTemplate() {
+        try (InputStream is = AliyunEmailSender.class
+                .getClassLoader()
+                .getResourceAsStream(HTML_TEMPLATE)) {
+            if (is != null) {
+                return new String(is.readAllBytes(), StandardCharsets.UTF_8);
+            }
+        } catch (IOException e) {
+            System.err.println("[WARN] Could not load HTML template: " + e.getMessage());
+        }
+        // Fallback inline template
+        return "<html><body>"
+                + "<h2>Elantor – Professional ULV Cold Fogger Factory</h2>"
+                + "<p>Dear Customer,</p>"
+                + "<p>We are <strong>Elantor Co., Ltd.</strong>, a professional manufacturer of ULV Cold Foggers "
+                + "founded in 2017 with 7+ years of production experience.</p>"
+                + "<p>Please find our product catalog attached. Contact us at "
+                + "<a href='mailto:info@elantor.com'>info@elantor.com</a> for pricing and orders.</p>"
+                + "<p>Best regards,<br/>Alex Chen | Sales Manager<br/>WhatsApp: +86 19540736965</p>"
+                + "</body></html>";
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    //  Entry point – example usage
+    // ────────────────────────────────────────────────────────────────────────
+
     public static void main(String[] args) {
-        // 测试发送文本邮件
-        sendEmail("3429265681@qq.com", "测试邮件", "这是来自阿里云企业邮箱的测试邮件", false);
-        // 测试发送HTML邮件
-        // sendEmail("customer@example.com", "HTML测试邮件", "<h1>标题</h1><p>这是HTML格式的邮件内容</p>", true);
+        // ── Example 1: Send marketing email with catalog to a single customer ──
+        sendMarketingEmail("customer@example.com");
+
+        // ── Example 2: Send to multiple customers ──
+        // String[] customers = {"buyer1@example.com", "buyer2@example.com"};
+        // for (String email : customers) {
+        //     sendMarketingEmail(email);
+        // }
+
+        // ── Example 3: Send plain-text email (legacy) ──
+        // sendEmail("test@example.com", "Test", "Hello from Elantor!", false);
     }
 }

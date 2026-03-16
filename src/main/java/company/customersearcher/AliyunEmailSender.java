@@ -8,9 +8,14 @@ import jakarta.mail.internet.MimeMessage;
 import jakarta.mail.internet.MimeMultipart;
 import jakarta.mail.util.ByteArrayDataSource;
 
+import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
+import java.io.FileReader;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Properties;
 
 /**
@@ -211,13 +216,60 @@ public class AliyunEmailSender {
     // ────────────────────────────────────────────────────────────────────────
 
     public static void main(String[] args) {
-        // ── Send marketing email to a single customer ──
-        sendMarketingEmail("customer@example.com");
+        // ── Determine email list file path ──
+        // Default: emails.txt in the working directory (project root when run from IDEA).
+        // You can also pass a custom path as the first command-line argument:
+        //   java -jar CustomerSearcher.jar /path/to/your/emails.txt
+        String filePath = (args.length > 0) ? args[0] : "emails.txt";
 
-        // ── Send to multiple customers ──
-        // String[] customers = {"buyer1@example.com", "buyer2@example.com"};
-        // for (String email : customers) {
-        //     sendMarketingEmail(email);
-        // }
+        List<String> emails = readEmailsFromFile(filePath);
+        if (emails.isEmpty()) {
+            System.err.println("[WARN] No email addresses found in: " + Paths.get(filePath).toAbsolutePath());
+            return;
+        }
+
+        System.out.println("[INFO] Loaded " + emails.size() + " email address(es) from: "
+                + Paths.get(filePath).toAbsolutePath());
+
+        int success = 0;
+        int failure = 0;
+        for (String email : emails) {
+            try {
+                sendMarketingEmail(email);
+                success++;
+                // Optional: small delay between sends to avoid rate limiting
+                Thread.sleep(1000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+        System.out.println("[INFO] Done. Success: " + success + ", Failed: " + failure
+                + ", Total: " + emails.size());
+    }
+
+    /**
+     * Read email addresses from a plain-text file, one address per line.
+     * Blank lines and lines starting with '#' (comments) are ignored.
+     *
+     * @param filePath Path to the email list file (absolute or relative to working directory)
+     * @return List of valid email address strings
+     */
+    private static List<String> readEmailsFromFile(String filePath) {
+        List<String> emails = new ArrayList<>();
+        try (BufferedReader reader = new BufferedReader(new FileReader(filePath))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                line = line.trim();
+                // Skip blank lines and comment lines
+                if (line.isEmpty() || line.startsWith("#")) {
+                    continue;
+                }
+                emails.add(line);
+            }
+        } catch (IOException e) {
+            System.err.println("[ERROR] Cannot read email list file '" + filePath + "': " + e.getMessage());
+        }
+        return emails;
     }
 }

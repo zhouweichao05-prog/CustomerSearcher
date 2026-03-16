@@ -1,0 +1,8 @@
+# Elantor Customer Email List
+# One email address per line.
+# Lines starting with '#' and blank lines are ignored.
+#
+# Example:
+# buyer@example.com
+# procurement@company.com
+

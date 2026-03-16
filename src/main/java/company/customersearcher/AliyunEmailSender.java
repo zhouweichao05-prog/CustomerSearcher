@@ -176,7 +176,7 @@ public class AliyunEmailSender {
                 + "founded in 2017 with 7+ years of production experience.</p>"
                 + "<p>Please find our product catalog attached. Contact us at "
                 + "<a href='mailto:info@elantor.com'>info@elantor.com</a> for pricing and orders.</p>"
-                + "<p>Best regards,<br/>Alex Chen | Sales Manager<br/>WhatsApp: +86 19540736965</p>"
+                + "<p>Best regards,<br/>Franklin Zhou | Sales Manager<br/>WhatsApp: +86 19540736965</p>"
                 + "</body></html>";
     }
 

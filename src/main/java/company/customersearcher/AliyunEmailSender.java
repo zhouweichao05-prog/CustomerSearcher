@@ -237,8 +237,8 @@ public class AliyunEmailSender {
             try {
                 sendMarketingEmail(email);
                 success++;
-                // Optional: small delay between sends to avoid rate limiting
-                Thread.sleep(1000);
+                // Delay between sends to avoid rate limiting (30 seconds)
+                Thread.sleep(30000);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 break;

@@ -22,22 +22,6 @@ import java.util.Properties;
  * Elantor Email Sender
  * Sends plain-text marketing emails with a PDF product catalog attachment.
  * Uses Alibaba Cloud Enterprise Mail (smtp.qiye.aliyun.com) via SSL.
- *
- * Fix log:
- *   v1.1 - Fixed "Connection reset by peer" caused by:
- *          1. SSL socket being reused across multiple sends (Transport.send() opens
- *             a new connection per call but the JVM SSL session cache can cause
- *             the server to reset stale connections on large payloads).
- *             → Switched to explicit Transport.connect() / transport.sendMessage()
- *               so one persistent authenticated connection is used per session,
- *               and properly closed after each send.
- *          2. Write timeout (60 s) too short for a 3 MB PDF attachment over a
- *             potentially slow link — server closes the socket mid-transfer.
- *             → Increased writetimeout to 120 s and added mail.smtp.ssl.socketFactory
- *               settings to prevent premature socket teardown.
- *          3. Missing message.saveChanges() before sending caused incomplete
- *             MIME headers which could trigger server-side resets.
- *             → Added explicit saveChanges() call.
  */
 public class AliyunEmailSender {
 
@@ -53,7 +37,7 @@ public class AliyunEmailSender {
 
     // ── Email Subject ────────────────────────────────────────────────────────
     private static final String EMAIL_SUBJECT =
-            "Elantor | Professional ULV Cold Fogger Factory - Special Offer & Product Catalog";
+            "Elantor | Professional ULV Cold Fogger Factory – Special Offer & Product Catalog";
 
     // ── Plain-text Email Body ────────────────────────────────────────────────
     private static final String EMAIL_BODY =
@@ -64,14 +48,14 @@ public class AliyunEmailSender {
             + "have been exported to more than 50 countries worldwide and are trusted by "
             + "pest control professionals, agricultural operators, and public health agencies.\n\n"
             + "---\n\n"
-            + "FEATURED PRODUCT: Electric ULV Cold Fogger - Model YF-500\n\n"
+            + "FEATURED PRODUCT: Electric ULV Cold Fogger – Model YF-500\n\n"
             + "This is our best-selling model, designed for efficient disinfection, "
             + "pest control, and chemical application across a wide range of environments.\n\n"
             + "Key Specifications:\n"
             + "  - Power:         1000W\n"
             + "  - Spray Range:   Up to 8 meters\n"
             + "  - Tank Capacity: 5 Liters\n"
-            + "  - Particle Size: 10 - 150 um (Adjustable)\n"
+            + "  - Particle Size: 10 – 150 μm (Adjustable)\n"
             + "  - Flow Rate:     470 ml/min\n"
             + "  - Net Weight:    2.35 kg\n"
             + "  - Voltage:       220V / 110V (Optional)\n"
@@ -100,13 +84,6 @@ public class AliyunEmailSender {
             + "Address:  Xing Business Building 310, Bulong Road, Bantian Street,\n"
             + "          Longgang District, Shenzhen, China 518118\n";
 
-    // ── Retry configuration ──────────────────────────────────────────────────
-    private static final int MAX_RETRIES    = 3;
-    private static final int RETRY_DELAY_MS = 15_000; // 15 s between retries
-
-    // ── Pre-loaded PDF bytes (loaded once at startup) ────────────────────────
-    private static final byte[] PDF_BYTES = loadResourceBytes(CATALOG_PDF);
-
     // ────────────────────────────────────────────────────────────────────────
     //  Public API
     // ────────────────────────────────────────────────────────────────────────
@@ -127,10 +104,10 @@ public class AliyunEmailSender {
             message.addRecipient(Message.RecipientType.TO, new InternetAddress(to));
             message.setSubject(subject, "UTF-8");
             message.setContent(content, isHtml ? "text/html;charset=UTF-8" : "text/plain;charset=UTF-8");
-            message.saveChanges();
-            sendWithRetry(session, message, to);
+            Transport.send(message);
+            System.out.println("[SUCCESS] Email sent to: " + to);
         } catch (MessagingException e) {
-            System.err.println("[ERROR] Failed to build email for " + to + ": " + e.getMessage());
+            System.err.println("[ERROR] Failed to send email to " + to + ": " + e.getMessage());
             e.printStackTrace();
         }
     }
@@ -142,7 +119,9 @@ public class AliyunEmailSender {
      * @param to Recipient email address
      */
     public static void sendMarketingEmail(String to) {
-        if (PDF_BYTES == null) {
+        byte[] pdfBytes = loadResourceBytes(CATALOG_PDF);
+
+        if (pdfBytes == null) {
             // No PDF found – send plain text only
             System.err.println("[WARN] PDF catalog not found on classpath: " + CATALOG_PDF
                     + ". Sending email without attachment.");
@@ -163,7 +142,7 @@ public class AliyunEmailSender {
 
             // ── PDF attachment part (loaded from classpath) ──
             MimeBodyPart attachPart = new MimeBodyPart();
-            ByteArrayDataSource pdfSource = new ByteArrayDataSource(PDF_BYTES, "application/pdf");
+            ByteArrayDataSource pdfSource = new ByteArrayDataSource(pdfBytes, "application/pdf");
             attachPart.setDataHandler(new DataHandler(pdfSource));
             attachPart.setFileName(CATALOG_PDF);
 
@@ -173,12 +152,10 @@ public class AliyunEmailSender {
             multipart.addBodyPart(attachPart);
 
             message.setContent(multipart);
-            // FIX: saveChanges() must be called to finalize MIME headers before sending
-            message.saveChanges();
-
-            sendWithRetry(session, message, to);
+            Transport.send(message);
+            System.out.println("[SUCCESS] Marketing email with catalog sent to: " + to);
         } catch (MessagingException e) {
-            System.err.println("[ERROR] Failed to build email for " + to + ": " + e.getMessage());
+            System.err.println("[ERROR] Failed to send email to " + to + ": " + e.getMessage());
             e.printStackTrace();
         }
     }
@@ -188,74 +165,26 @@ public class AliyunEmailSender {
     // ────────────────────────────────────────────────────────────────────────
 
     /**
-     * FIX: Send via explicit Transport connection instead of static Transport.send().
-     *
-     * Static Transport.send() opens a new SSL connection, sends, and closes for
-     * every call. When sending large attachments (3 MB PDF), the Alibaba Cloud
-     * SMTP server may reset the connection mid-transfer if it detects the session
-     * is not properly authenticated or the write takes too long.
-     *
-     * Using an explicit Transport.connect() + transport.sendMessage() + transport.close()
-     * gives us full control over the connection lifecycle and avoids the SSL session
-     * reuse issue that triggers "Connection reset by peer".
-     *
-     * Retry logic handles transient network failures.
-     */
-    private static void sendWithRetry(Session session, MimeMessage message, String to) {
-        int attempt = 0;
-        while (attempt < MAX_RETRIES) {
-            attempt++;
-            Transport transport = null;
-            try {
-                transport = session.getTransport("smtps");
-                transport.connect(SMTP_HOST, SMTP_PORT, SENDER_EMAIL, SENDER_PASSWORD);
-                transport.sendMessage(message, message.getAllRecipients());
-                System.out.println("[SUCCESS] Email sent to: " + to
-                        + (attempt > 1 ? " (attempt " + attempt + ")" : ""));
-                return; // success – exit retry loop
-            } catch (MessagingException e) {
-                System.err.println("[ERROR] Attempt " + attempt + "/" + MAX_RETRIES
-                        + " failed for " + to + ": " + e.getMessage());
-                if (attempt < MAX_RETRIES) {
-                    System.err.println("[INFO]  Retrying in " + (RETRY_DELAY_MS / 1000) + "s...");
-                    try { Thread.sleep(RETRY_DELAY_MS); } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                        return;
-                    }
-                } else {
-                    System.err.println("[ERROR] All " + MAX_RETRIES + " attempts failed for: " + to);
-                    e.printStackTrace();
-                }
-            } finally {
-                if (transport != null && transport.isConnected()) {
-                    try { transport.close(); } catch (MessagingException ignored) {}
-                }
-            }
-        }
-    }
-
-    /**
      * Build and return an authenticated SMTP Session with timeout settings
      * to prevent connection reset on larger attachments.
-     *
-     * Key fixes vs v1.0:
-     *   - writetimeout increased from 60 s to 120 s (3 MB PDF needs more time)
-     *   - ssl.checkserveridentity = true for security
-     *   - ssl.trust set to SMTP host to avoid handshake issues on some JVMs
      */
     private static Session createSession() {
         Properties props = new Properties();
-        props.put("mail.smtps.host",                  SMTP_HOST);
-        props.put("mail.smtps.port",                  String.valueOf(SMTP_PORT));
-        props.put("mail.smtps.auth",                  "true");
-        props.put("mail.smtps.ssl.enable",            "true");
-        props.put("mail.smtps.ssl.trust",             SMTP_HOST);
-        props.put("mail.smtps.ssl.checkserveridentity", "true");
-        props.put("mail.smtps.connectiontimeout",     "30000");   // 30 s connect
-        props.put("mail.smtps.timeout",               "120000");  // 120 s read
-        props.put("mail.smtps.writetimeout",          "120000");  // 120 s write (was 60 s)
+        props.put("mail.smtp.host",              SMTP_HOST);
+        props.put("mail.smtp.port",              String.valueOf(SMTP_PORT));
+        props.put("mail.smtp.ssl.enable",        "true");
+        props.put("mail.smtp.auth",              "true");
+        props.put("mail.smtp.connectiontimeout", "30000");  // 30s connect timeout
+        props.put("mail.smtp.timeout",           "60000");  // 60s read timeout
+        props.put("mail.smtp.writetimeout",      "60000");  // 60s write timeout
 
-        return Session.getInstance(props);
+        Authenticator auth = new Authenticator() {
+            @Override
+            protected PasswordAuthentication getPasswordAuthentication() {
+                return new PasswordAuthentication(SENDER_EMAIL, SENDER_PASSWORD);
+            }
+        };
+        return Session.getInstance(props, auth);
     }
 
     /**
@@ -283,7 +212,7 @@ public class AliyunEmailSender {
     }
 
     // ────────────────────────────────────────────────────────────────────────
-    //  Entry point
+    //  Entry point – example usage
     // ────────────────────────────────────────────────────────────────────────
 
     public static void main(String[] args) {
@@ -301,8 +230,6 @@ public class AliyunEmailSender {
 
         System.out.println("[INFO] Loaded " + emails.size() + " email address(es) from: "
                 + Paths.get(filePath).toAbsolutePath());
-        System.out.println("[INFO] PDF attachment: "
-                + (PDF_BYTES != null ? String.format("%.1f KB", PDF_BYTES.length / 1024.0) : "NOT FOUND"));
 
         int success = 0;
         int failure = 0;
@@ -310,12 +237,9 @@ public class AliyunEmailSender {
             try {
                 sendMarketingEmail(email);
                 success++;
-            } catch (Exception e) {
-                failure++;
-                System.err.println("[ERROR] Unexpected error for " + email + ": " + e.getMessage());
-            }
-            // Delay between sends to avoid rate limiting (30 seconds)
-            try { Thread.sleep(30_000); } catch (InterruptedException e) {
+                // Delay between sends to avoid rate limiting (30 seconds)
+                Thread.sleep(30000);
+            } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 break;
             }
